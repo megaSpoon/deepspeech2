@@ -5,6 +5,9 @@ This demo code contains the inference based on pre-trained Deep Speech 2 model o
 ### ds2 model (~387MB):
 https://drive.google.com/open?id=0B9zID9CU9HQeU1luc2ZKSHA1MjA
 
+nervna model:
+https://drive.google.com/drive/folders/0B9zID9CU9HQeM1M1SXpmN3oyLUU
+
 
 ### Run inference with example:
 
