@@ -1,0 +1,8 @@
+# IDEA files
+.idea/
+target/
+*.iml
+*.pyc
+*.log
+*.jar
+spark-warehouse/
