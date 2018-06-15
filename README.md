@@ -1,21 +1,21 @@
+Steps to run
 
-This demo code contains the inference based on pre-trained Deep Speech 2 model on BigDL 0.1.
-(Soon to be updated to 0.3). The example runs on Spark 2.0+
-
-### ds2 model (~387MB):
-https://drive.google.com/open?id=0B9zID9CU9HQeU1luc2ZKSHA1MjA
+### Download ds2 model :
 
 nervna model:
 https://drive.google.com/drive/folders/0B9zID9CU9HQeM1M1SXpmN3oyLUU
 
+download it and unzip into the ***data*** folder
 
-### Run inference with example:
+### build jar
+In repo main directory, run ```mvn clean package``` and get deepspeech2-bigdl-0.6-SNAPSHOT-jar-with-dependencies.jar
 
-1. Download model file "dp2.bigdl" from the link above.
+### Run Nervanainference with example:
 
-2. Import the project into IDE or build with "mvn clean package".
+set SPARK_HOME(version recommended: 2.0.1) and put deepspeech2-bigdl-0.6-SNAPSHOT-jar-with-dependencies.jar in current repo 
+main directory
 
-3. script to run ds2 inference:
+run the following script for nervana ds2 inference with bigdl:
 
 ```shell
    spark-submit --master local[1] \
@@ -24,7 +24,7 @@ https://drive.google.com/drive/folders/0B9zID9CU9HQeM1M1SXpmN3oyLUU
    --driver-class-path deepspeech2-bigdl-0.6-SNAPSHOT-jar-with-dependencies.jar \
    --class com.intel.analytics.zoo.pipeline.deepspeech2.example.NervanaInferenceExample \
    deepspeech2-bigdl-0.6-SNAPSHOT-jar-with-dependencies.jar  \
-   -m /home/wickedspoon/Documents/work/analytics-zoo/pipeline/deepspeech2/model/dp2.bigdl \
+   -m data/ \
    -d data/1462-170145-0004.flac -n 1 -p 1 -s 30
 
    ```
