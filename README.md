@@ -18,7 +18,7 @@ main directory
 run the following script for nervana ds2 inference with bigdl:
 
 ```shell
- $SPARK_HOME/binspark-submit --master local[1] \
+ $SPARK_HOME/bin/spark-submit --master local[1] \
    --conf spark.driver.memory=15g \
    --conf "spark.serializer=org.apache.spark.serializer.JavaSerializer" \
    --driver-class-path deepspeech2-bigdl-0.6-SNAPSHOT-jar-with-dependencies.jar \
