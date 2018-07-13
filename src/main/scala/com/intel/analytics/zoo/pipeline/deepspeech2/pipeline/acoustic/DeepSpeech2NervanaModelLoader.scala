@@ -62,8 +62,15 @@ class DeepSpeech2NervanaModelLoader[T : ClassTag](depth: Int = 1)(implicit ev: T
     */
   def addBRNN(inputSize: Int, hiddenSize: Int, isCloneInput: Boolean, depth: Int): Module[T] = {
     Sequential()
-      .add(BiRecurrent[T](CAddTable())
-        .add(RnnCell[T](inputSize, hiddenSize, HardTanh[T](0, 20, true))).setName("birnn" + depth))
+      .add(BifurcateSplitTable[T](3))
+      .add(ParallelTable[T]()
+        .add(TimeDistributed[T](Linear[T](inputSize, hiddenSize, withBias = false)))
+        .add(TimeDistributed[T](Linear[T](inputSize, hiddenSize, withBias = false))))
+      .add(JoinTable[T](2, 2))
+      .add(BatchNormalizationDS[T](hiddenSize * 2, eps = 0.001))
+      //        .add(BiRecurrentDS[T](JoinTable[T](2, 2), isCloneInput = false)
+      .add(BiRecurrentDS[T](CAddTable(), isCloneInput = false)
+      .add(RnnCellDS[T](hiddenSize, hiddenSize, HardTanh[T](0, 20, true))).setName("birnn" + depth))
   }
 
   val brnn = Sequential()
@@ -77,7 +84,7 @@ class DeepSpeech2NervanaModelLoader[T : ClassTag](depth: Int = 1)(implicit ev: T
     i += 1
   }
 
-  val linear1 = TimeDistributed[T](Linear[T](hiddenSize, hiddenSize, withBias = false))
+  val linear1 = TimeDistributed[T](Linear[T](hiddenSize * 2, hiddenSize, withBias = false))
   val linear2 = TimeDistributed[T](Linear[T](hiddenSize, nChar, withBias = false))
 
   /**
@@ -150,6 +157,7 @@ class DeepSpeech2NervanaModelLoader[T : ClassTag](depth: Int = 1)(implicit ev: T
         "parameter's size doesn't match")
       linear2.parameters()._1(0)
         .set(Storage[T](weights), 1, Array(29, 1152))
+      print("linear2 dimension does match")
     }
   }
 }
@@ -292,8 +300,8 @@ object DeepSpeech2NervanaModelLoader {
     dp2.setConvWeight(convert(convWeights, convFeatureSize))
     dp2.setBiRNNWeight(weightsBirnn)
     // TODO: check size
-//    dp2.setLinear0Weight(weightsLinear0, 0)
-//    dp2.setLinear0Weight(weightsLinear1, 1)
+    dp2.setLinear0Weight(weightsLinear0, 0)
+    dp2.setLinear0Weight(weightsLinear1, 1)
 
     dp2.model
   }
