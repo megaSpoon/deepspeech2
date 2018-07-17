@@ -1,6 +1,7 @@
 package com.intel.analytics.zoo.pipeline.deepspeech2.pipeline.acoustic
 
 import breeze.math.Complex
+import com.intel.analytics.bigdl.models.utils.ModelBroadcast
 import com.intel.analytics.bigdl.tensor.{Storage, Tensor}
 import org.apache.spark.ml.Transformer
 import org.apache.spark.ml.linalg.{Vector, Vectors}
@@ -27,7 +28,9 @@ class DeepSpeech2NervanaModelTransformer ( override val uid: String)
 
   override def transform(dataset: Dataset[_]): DataFrame = {
 
-    val model = DeepSpeech2NervanaModelLoader.loadModel(dataset.sparkSession.sparkContext)
+    val model = DeepSpeech2NervanaModelLoader.loadModel[Float](dataset.sparkSession.sparkContext)
+//    val model = new DeepSpeech2NervanaModelLoader[Float](9).model
+    val broadcastModel = ModelBroadcast[Float]().broadcast(dataset.sqlContext.sparkContext, model)
     val outputSchema = transformSchema(dataset.schema)
 //    val reScale = udf { (samples: Array[Float]) =>
 //      val input = Tensor[Float](Storage(samples), 1, Array(1, 1, 13, 398))
@@ -35,12 +38,15 @@ class DeepSpeech2NervanaModelTransformer ( override val uid: String)
 //      Vectors.dense(output.storage().toArray.map(_.toDouble))
 //      //output.storage().toArray
 //    }
+    println(s"model length is ${model.parameters()._1.map(_.nElement()).sum}")
     val height = 13
     val reScale = udf { (samples: mutable.WrappedArray[Double]) =>
+      val localModel = broadcastModel.value()
       val width = samples.size / height
-      val input = Tensor[Double](Storage(samples.toArray), 1, Array(1, 1, height, width))
-      val output = model.forward(input).toTensor[Double].transpose(2, 3)
-      output.storage().toArray
+      val input = Tensor[Float](Storage(samples.toArray.map(_.toFloat)), 1, Array(1, 1, height, width))
+      val output = localModel.forward(input).toTensor[Float].transpose(2, 3)
+//      val output = model.output.toTensor[Double].transpose(2, 3)
+      output.storage().toArray.map(_.toDouble)
     }
 
     dataset.withColumn($(outputCol), reScale(col($(inputCol))))

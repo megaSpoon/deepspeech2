@@ -62,8 +62,15 @@ class DeepSpeech2NervanaModelLoader[T : ClassTag](depth: Int = 1)(implicit ev: T
     */
   def addBRNN(inputSize: Int, hiddenSize: Int, isCloneInput: Boolean, depth: Int): Module[T] = {
     Sequential()
-      .add(BiRecurrent[T](CAddTable())
-        .add(RnnCell[T](inputSize, hiddenSize, HardTanh[T](0, 20, true))).setName("birnn" + depth))
+      .add(BifurcateSplitTable[T](3))
+      .add(ParallelTable[T]()
+        .add(TimeDistributed[T](Linear[T](inputSize, hiddenSize, withBias = false)))
+        .add(TimeDistributed[T](Linear[T](inputSize, hiddenSize, withBias = false))))
+      .add(JoinTable[T](2, 2))
+      .add(BatchNormalizationDS[T](hiddenSize * 2, eps = 0.001))
+      //        .add(BiRecurrentDS[T](JoinTable[T](2, 2), isCloneInput = false)
+      .add(BiRecurrentDS[T](CAddTable(), isCloneInput = false)
+      .add(RnnCellDS[T](hiddenSize, hiddenSize, HardTanh[T](0, 20, true))).setName("birnn" + depth))
   }
 
   val brnn = Sequential()
@@ -77,7 +84,7 @@ class DeepSpeech2NervanaModelLoader[T : ClassTag](depth: Int = 1)(implicit ev: T
     i += 1
   }
 
-  val linear1 = TimeDistributed[T](Linear[T](hiddenSize, hiddenSize, withBias = false))
+  val linear1 = TimeDistributed[T](Linear[T](hiddenSize * 2, hiddenSize, withBias = false))
   val linear2 = TimeDistributed[T](Linear[T](hiddenSize, nChar, withBias = false))
 
   /**
@@ -103,8 +110,11 @@ class DeepSpeech2NervanaModelLoader[T : ClassTag](depth: Int = 1)(implicit ev: T
     conv.bias.fill(ev.fromType[Double](0.0))
   }
 
+  // TODO: merge this and convert
   def setConvWeight(weights: Array[T]): Unit = {
     val temp = Tensor[T](Storage(weights), 1, Array(1, 1152, 1, 13, 11))
+    require(temp.nElement() == conv.weight.nElement(),
+      "parameter's size doesn't match")
     conv.weight.set(Storage[T](weights), 1, conv.weight.size())
   }
 
@@ -112,6 +122,7 @@ class DeepSpeech2NervanaModelLoader[T : ClassTag](depth: Int = 1)(implicit ev: T
     * load in the nervana's dp2 BiRNN model parameters
     * @param weights
     */
+  // TODO: merge this and convertBiRNN
   def setBiRNNWeight(weights: Array[Array[T]]): Unit = {
     val parameters = brnn.parameters()._1
     // six tensors per brnn layer
@@ -121,6 +132,8 @@ class DeepSpeech2NervanaModelLoader[T : ClassTag](depth: Int = 1)(implicit ev: T
       for (j <- 0 until numOfParams) {
         val length = parameters(i * numOfParams + j).nElement()
         val size = parameters(i * numOfParams + j).size
+        require(length == size.product,
+          "parameter's size doesn't match")
         parameters(i * numOfParams + j).set(Storage[T](weights(i)), offset, size)
         offset += length
       }
@@ -132,13 +145,19 @@ class DeepSpeech2NervanaModelLoader[T : ClassTag](depth: Int = 1)(implicit ev: T
     * @param weights
     * @param num
     */
+  // TODO: merge this and convertLinear
   def setLinear0Weight(weights: Array[T], num: Int): Unit = {
     if (num == 0) {
+      require(linear1.parameters()._1(0).nElement() == weights.length,
+        "parameter's size doesn't match")
       linear1.parameters()._1(0)
         .set(Storage[T](weights), 1, Array(1152, 2304))
     } else {
+      require(linear2.parameters()._1(0).nElement() == weights.length,
+        "parameter's size doesn't match")
       linear2.parameters()._1(0)
         .set(Storage[T](weights), 1, Array(29, 1152))
+      print("linear2 dimension does match")
     }
   }
 }
@@ -159,7 +178,7 @@ object DeepSpeech2NervanaModelLoader {
     val sc = new SparkContext(conf)
     val spark = SparkSession.builder().master("local[6]").appName("test").getOrCreate()
     import spark.implicits._
-    val dp2 = loadModel(spark.sparkContext)
+    val dp2 = loadModel[Double](spark.sparkContext)
     logger.info("run the model ..")
 
     logger.info("load in inputs and expectOutputs ..")
@@ -206,7 +225,8 @@ object DeepSpeech2NervanaModelLoader {
     logger.info("total relative error is : " + accDiff)
   }
 
-  def loadModel(sc: SparkContext): Module[Double] = {
+  def loadModel[T: ClassTag](sc: SparkContext)
+                            (implicit  ev: TensorNumeric[T]): Module[T] = {
 
 
     /**
@@ -249,25 +269,25 @@ object DeepSpeech2NervanaModelLoader {
 
     logger.info("load in conv weights ..")
     val convWeights = sc.textFile(convPath)
-        .map(_.split(',').map(_.toDouble)).flatMap(t => t).collect()
+      .flatMap(_.split(",").map(v => ev.fromType(v.toFloat))).collect()
 
     logger.info("load in birnn weights ..")
-    val weightsBirnn = new Array[Array[Double]](depth)
+    val weightsBirnn = new Array[Array[T]](depth)
     for (i <- 0 until depth) {
       val birnnOrigin = sc.textFile(birnnPath + i + ".txt")
-          .map(_.split(",").map(_.toDouble)).flatMap(t => t).collect()
-      weightsBirnn(i) = convertBiRNN(birnnOrigin, birnnFeatureSize)
+        .flatMap(_.split(",").map(v => ev.fromType(v.toFloat))).collect()
+      weightsBirnn(i) = convertBiRNN[T](birnnOrigin, birnnFeatureSize)
     }
 
     logger.info("load in linear1 weights ..")
     val linearOrigin0 = sc.textFile(linear1Path)
-        .map(_.split(",").map(_.toDouble)).flatMap(t => t).collect()
-    val weightsLinear0 = convertLinear(linearOrigin0, linear1FeatureSize)
+      .flatMap(_.split(",").map(v => ev.fromType(v.toFloat))).collect()
+    val weightsLinear0 = convertLinear[T](linearOrigin0, linear1FeatureSize)
 
     logger.info("load in linear2 weights ..")
     val linearOrigin1 = sc.textFile(linear2Path)
-        .map(_.split(",").map(_.toDouble)).flatMap(t => t).collect()
-    val weightsLinear1 = convertLinear(linearOrigin1, linear2FeatureSize)
+      .flatMap(_.split(",").map(v => ev.fromType(v.toFloat))).collect()
+    val weightsLinear1 = convertLinear[T](linearOrigin1, linear2FeatureSize)
 
     /**
       **************************************************************************
@@ -275,19 +295,20 @@ object DeepSpeech2NervanaModelLoader {
       *  dp2.evaluate()
       **************************************************************************
       */
-    val dp2 = new DeepSpeech2NervanaModelLoader[Double](depth)
+    val dp2 = new DeepSpeech2NervanaModelLoader[T](depth)
     dp2.reset()
     dp2.setConvWeight(convert(convWeights, convFeatureSize))
     dp2.setBiRNNWeight(weightsBirnn)
+    // TODO: check size
     dp2.setLinear0Weight(weightsLinear0, 0)
     dp2.setLinear0Weight(weightsLinear1, 1)
 
     dp2.model
   }
 
-  def convert(origin: Array[Double], channelSize: Int): Array[Double] = {
+  def convert[T: ClassTag](origin: Array[T], channelSize: Int): Array[T] = {
     val channel = channelSize
-    val buffer = new ArrayBuffer[Double]()
+    val buffer = new ArrayBuffer[T]()
     val groups = origin.grouped(channelSize).toArray
 
     for(i <- 0 until channel)
@@ -296,9 +317,9 @@ object DeepSpeech2NervanaModelLoader {
     buffer.toArray
   }
 
-  def convertLinear(origin: Array[Double], channelSize: Int): Array[Double] = {
+  def convertLinear[T: ClassTag](origin: Array[T], channelSize: Int): Array[T] = {
     val channel = channelSize
-    val buffer = new ArrayBuffer[Double]()
+    val buffer = new ArrayBuffer[T]()
     val groups = origin.grouped(channelSize).toArray
 
     for (j <- 0 until groups.length)
@@ -307,13 +328,13 @@ object DeepSpeech2NervanaModelLoader {
     buffer.toArray
   }
 
-  def convertBiRNN(origin: Array[Double], channelSize: Int): Array[Double] = {
+  def convertBiRNN[T: ClassTag](origin: Array[T], channelSize: Int): Array[T] = {
     val nIn = channelSize
     val nOut = channelSize
     val heights = 2 * (nIn + nOut + 1)
     val widths = nOut
 
-    val buffer = new ArrayBuffer[Double]()
+    val buffer = new ArrayBuffer[T]()
     val groups = origin.grouped(nOut).toArray
 
     /**
