@@ -18,9 +18,10 @@ package com.intel.analytics.zoo.pipeline.deepspeech2.pipeline.acoustic
 
 import com.intel.analytics.bigdl._
 import com.intel.analytics.bigdl.nn._
+import com.intel.analytics.bigdl.nn.abstractnn.AbstractModule
 import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric
 import com.intel.analytics.bigdl.tensor.{Storage, Tensor}
-import com.intel.analytics.bigdl.utils.Engine
+import com.intel.analytics.bigdl.utils.{Engine, Table}
 import org.apache.log4j.{Level, Logger}
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.SparkSession
@@ -29,7 +30,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.language.existentials
 import scala.reflect.ClassTag
 
-class DeepSpeech2NervanaModelLoader[T : ClassTag](depth: Int = 1)(implicit ev: TensorNumeric[T]) {
+class DeepSpeech2NervanaModelLoader[T : ClassTag] (depth: Int = 1)(implicit ev: TensorNumeric[T]) {
 
   /**
     * The configuration of convolution for dp2.
@@ -57,19 +58,29 @@ class DeepSpeech2NervanaModelLoader[T : ClassTag](depth: Int = 1)(implicit ev: T
     * @param inputSize
     * @param hiddenSize
     * @param isCloneInput
-    * @param depth
+    * @param curDepth
     * @return
     */
-  def addBRNN(inputSize: Int, hiddenSize: Int, isCloneInput: Boolean, depth: Int): Module[T] = {
-    Sequential()
-      .add(BifurcateSplitTable[T](3))
+  def addBRNN(inputSize: Int, hiddenSize: Int, isCloneInput: Boolean, curDepth: Int): Module[T] = {
+    print("inputSize:  "+ inputSize)
+    val layers = Sequential()
+    if (curDepth == 1) {
+      layers
+        .add(ConcatTable()
+          .add(Identity[T]())
+          .add(Identity[T]()))
+    } else {
+      layers
+        .add(BifurcateSplitTable[T](3))
+    }
+    layers
       .add(ParallelTable[T]()
         .add(TimeDistributed[T](Linear[T](inputSize, hiddenSize, withBias = false)))
         .add(TimeDistributed[T](Linear[T](inputSize, hiddenSize, withBias = false))))
       .add(JoinTable[T](2, 2))
       .add(BatchNormalizationDS[T](hiddenSize * 2, eps = 0.001))
-      //        .add(BiRecurrentDS[T](JoinTable[T](2, 2), isCloneInput = false)
-      .add(BiRecurrentDS[T](CAddTable(), isCloneInput = false)
+              .add(BiRecurrentDS[T](JoinTable[T](2, 2).asInstanceOf[AbstractModule[Table, Tensor[T], T]], isCloneInput = false)
+      //.add(BiRecurrentDS[T](CAddTable(), isCloneInput = false)
       .add(RnnCellDS[T](hiddenSize, hiddenSize, HardTanh[T](0, 20, true))).setName("birnn" + depth))
   }
 
