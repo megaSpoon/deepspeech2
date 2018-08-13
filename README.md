@@ -26,8 +26,13 @@ run the following script for nervana ds2 inference with bigdl:
    deepspeech2-bigdl-0.7-SNAPSHOT-jar-with-dependencies.jar  \
    -m data/ \
    -d data/1462-170145-0004.flac -n 1 -p 1 -s 30
-
    ```
+   
+## Performance on dev-clean dataset:
+- time: 1201.823576362
+- cer: 0.1646082949308756
+- wer: 0.41586538461538464
+
 
 
 
