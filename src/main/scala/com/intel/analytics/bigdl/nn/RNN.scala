@@ -22,30 +22,21 @@ import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric
 import com.intel.analytics.bigdl.utils.RandomGenerator._
 import com.intel.analytics.bigdl.utils.Table
 import com.intel.analytics.bigdl.optim.Regularizer
+import com.intel.analytics.bigdl.optim.SGD.Default
 
 import scala.reflect.ClassTag
 
 @SerialVersionUID( 5237686508074490666L)
 class RnnCellDS[T : ClassTag](
-  inputSize: Int = 4,
-  hiddenSize: Int = 3,
-  activation: TensorModule[T],
-  val isInputWithBias: Boolean = true,
-  val isHiddenWithBias: Boolean = true,
-  var wRegularizer: Regularizer[T] = null,
-  var uRegularizer: Regularizer[T] = null,
-  var bRegularizer: Regularizer[T] = null,
-  private var initMethod: InitializationMethod = null)
+                               inputSize: Int = 4,
+                               hiddenSize: Int = 3,
+                               activation: TensorModule[T],
+                               private var initMethod: InitializationMethod = Zeros)
                              (implicit ev: TensorNumeric[T])
-  extends Cell[T](Array(hiddenSize),
-    regularizers = Array(wRegularizer, uRegularizer, bRegularizer)) {
+  extends Cell[T](Array(hiddenSize)) {
 
-  override var preTopology: TensorModule[T] =
-    Linear[T](inputSize,
-      hiddenSize,
-      wRegularizer = wRegularizer,
-      bRegularizer = bRegularizer,
-      withBias = isInputWithBias)
+
+  override var preTopology: TensorModule[T] = null
 
   val parallelTable = ParallelTable[T]()
   val i2h = Identity[T]()
@@ -70,7 +61,7 @@ class RnnCellDS[T : ClassTag](
 
   override def reset(): Unit = {
     initMethod match {
-      case null =>
+      case Zeros =>
         parallelTable.modules.foreach( m => {
           val inputSize = m.asInstanceOf[Linear[T]].weight.size(1).toFloat
           val outputSize = m.asInstanceOf[Linear[T]].weight.size(2).toFloat

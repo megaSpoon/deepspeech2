@@ -30,5 +30,5 @@ case class LocalOptimizerPerfParam(
   dataPath: String = null,
   modelPath: String = null,
   partition: Int = 4,
-  numFile: Int = 8,
+  numFile: Int = 100,
   segment: Int = 30)

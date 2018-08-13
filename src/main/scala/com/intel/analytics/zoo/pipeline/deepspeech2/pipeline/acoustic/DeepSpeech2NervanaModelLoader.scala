@@ -30,7 +30,8 @@ import scala.collection.mutable.ArrayBuffer
 import scala.language.existentials
 import scala.reflect.ClassTag
 
-class DeepSpeech2NervanaModelLoader[T : ClassTag] (depth: Int = 1)(implicit ev: TensorNumeric[T]) {
+class DeepSpeech2NervanaModelLoader[T : ClassTag] (depth: Int = 1, isPaperVersion: Boolean = false)
+                                                  (implicit ev: TensorNumeric[T]) {
 
   /**
     * The configuration of convolution for dp2.
@@ -57,40 +58,69 @@ class DeepSpeech2NervanaModelLoader[T : ClassTag] (depth: Int = 1)(implicit ev: 
     * append BiRNN layers to the deepspeech model.
     * @param inputSize
     * @param hiddenSize
-    * @param isCloneInput
     * @param curDepth
     * @return
     */
-  def addBRNN(inputSize: Int, hiddenSize: Int, isCloneInput: Boolean, curDepth: Int): Module[T] = {
-    print("inputSize:  "+ inputSize)
+//  def addBRNN(inputSize: Int, hiddenSize: Int, isCloneInput: Boolean, curDepth: Int): Module[T] = {
+//    val layers = Sequential()
+//
+//    if (curDepth == 1) {
+//      layers
+//        .add(ConcatTable()
+//          .add(Identity[T]())
+//          .add(Identity[T]()))
+//    } else {
+//      layers
+//        .add(BifurcateSplitTable[T](3))
+//    }
+//    layers
+//      .add(ParallelTable[T]()
+//        .add(TimeDistributed[T](Linear[T](inputSize, hiddenSize, withBias = false).setName("i2h_left" + depth)))
+//        .add(TimeDistributed[T](Linear[T](inputSize, hiddenSize, withBias = false).setName("i2h_right" + depth))))
+//      .add(JoinTable[T](2, 2))
+//      .add(BatchNormalizationDS[T](hiddenSize * 2, eps = 0.001))
+//      .add(BiRecurrentDS[T](JoinTable[T](2, 2).asInstanceOf[AbstractModule[Table, Tensor[T], T]], isCloneInput = false)
+//        .add(RnnCellDS[T](inputSize, hiddenSize, HardTanh[T](0, 20, true))).setName("birnn" + depth))
+//    layers
+//  }
+  def addBRNN(inputSize: Int, hiddenSize: Int, curDepth: Int)
+  : Module[T] = {
     val layers = Sequential()
-    if (curDepth == 1) {
+    if (isPaperVersion) {
       layers
-        .add(ConcatTable()
-          .add(Identity[T]())
-          .add(Identity[T]()))
-    } else {
-      layers
-        .add(BifurcateSplitTable[T](3))
-    }
-    layers
-      .add(ParallelTable[T]()
         .add(TimeDistributed[T](Linear[T](inputSize, hiddenSize, withBias = false)))
-        .add(TimeDistributed[T](Linear[T](inputSize, hiddenSize, withBias = false))))
-      .add(JoinTable[T](2, 2))
-      .add(BatchNormalizationDS[T](hiddenSize * 2, eps = 0.001))
-              .add(BiRecurrentDS[T](JoinTable[T](2, 2).asInstanceOf[AbstractModule[Table, Tensor[T], T]], isCloneInput = false)
-      //.add(BiRecurrentDS[T](CAddTable(), isCloneInput = false)
-      .add(RnnCellDS[T](hiddenSize, hiddenSize, HardTanh[T](0, 20, true))).setName("birnn" + depth))
-  }
+        .add(BatchNormalizationDS[T](hiddenSize, eps = 0.001))
+        .add(BiRecurrentDS[T](isCloneInput = true)
+          .add(RnnCellDS[T](hiddenSize, hiddenSize, HardTanh[T](0, 20, true))).setName("birnn" + depth))
+    } else {
+      if (curDepth == 1) {
+        layers
+          .add(ConcatTable()
+            .add(Identity[T]())
+            .add(Identity[T]()))
+      } else {
+        layers
+          .add(BifurcateSplitTable[T](3))
+      }
+      layers
+        .add(ParallelTable[T]()
+          .add(TimeDistributed[T](Linear[T](inputSize, hiddenSize, withBias = false)))
+          .add(TimeDistributed[T](Linear[T](inputSize, hiddenSize, withBias = false))))
+        .add(JoinTable[T](2, 2))
+        .add(BatchNormalizationDS[T](hiddenSize * 2, eps = 0.001))
+        .add(BiRecurrentDS[T](JoinTable[T](2, 2).asInstanceOf[AbstractModule[Table, Tensor[T], T]], isCloneInput = false)
+          .add(RnnCellDS[T](hiddenSize, hiddenSize, HardTanh[T](0, 20, true))).setName("birnn" + depth))
+    }
+  layers
+}
 
   val brnn = Sequential()
   var i = 1
   while (i <= depth) {
     if (i == 1) {
-      brnn.add(addBRNN(inputSize, hiddenSize, isCloneInput = true, i))
+      brnn.add(addBRNN(inputSize, hiddenSize, i))
     } else {
-      brnn.add(addBRNN(hiddenSize, hiddenSize, isCloneInput = false, i))
+      brnn.add(addBRNN(hiddenSize, hiddenSize, i))
     }
     i += 1
   }
@@ -117,8 +147,8 @@ class DeepSpeech2NervanaModelLoader[T : ClassTag] (depth: Int = 1)(implicit ev: 
     .add(linear2)
 
   def reset(): Unit = {
-    conv.weight.fill(ev.fromType[Double](0.0))
-    conv.bias.fill(ev.fromType[Double](0.0))
+    conv.weight.fill(ev.fromType[Float](0.0F))
+    conv.bias.fill(ev.fromType[Float](0.0F))
   }
 
   // TODO: merge this and convert
@@ -168,7 +198,6 @@ class DeepSpeech2NervanaModelLoader[T : ClassTag] (depth: Int = 1)(implicit ev: 
         "parameter's size doesn't match")
       linear2.parameters()._1(0)
         .set(Storage[T](weights), 1, Array(29, 1152))
-      print("linear2 dimension does match")
     }
   }
 }
@@ -189,20 +218,20 @@ object DeepSpeech2NervanaModelLoader {
     val sc = new SparkContext(conf)
     val spark = SparkSession.builder().master("local[6]").appName("test").getOrCreate()
     import spark.implicits._
-    val dp2 = loadModel[Double](spark.sparkContext)
+    val dp2 = loadModel[Float](spark.sparkContext)
     logger.info("run the model ..")
 
     logger.info("load in inputs and expectOutputs ..")
     val inputPath = "data/inputdata.txt"
     val nervanaOutputPath = "data/output.txt"
     val inputs = spark.sparkContext.textFile(inputPath)
-      .map(_.toDouble).collect()
+      .map(_.toFloat).collect()
     val expectOutputs = spark.sparkContext.textFile(nervanaOutputPath)
-      .map(_.split(',').map(_.toDouble)).flatMap(t => t).collect()
-    evaluate(dp2, inputs, convert(expectOutputs, 66))
+      .map(_.split(',').map(_.toFloat)).flatMap(t => t).collect()
+    evaluate(dp2, inputs, convert(expectOutputs, 1000))
   }
 
-  private def evaluate(model: Module[Double], inputs: Array[Double], expectOutputs: Array[Double]): Unit = {
+  private def evaluate(model: Module[Float], inputs: Array[Float], expectOutputs: Array[Float]): Unit = {
 
     /**
       ********************************************************
@@ -210,8 +239,8 @@ object DeepSpeech2NervanaModelLoader {
       *  please modify it according to your input sample.
       ********************************************************
       */
-    val input = Tensor[Double](Storage(inputs), 1, Array(1, 1, 13, 198))
-    val output = model.forward(input).toTensor[Double]
+    val input = Tensor[Float](Storage(inputs), 1, Array(1, 1, 13, inputs.length / 13))
+    val output = model.forward(input).toTensor[Float]
     println(output)
 
     var idx = 0
@@ -266,7 +295,6 @@ object DeepSpeech2NervanaModelLoader {
     val birnnFeatureSize = 1152
     val linear1FeatureSize = 2304
     val linear2FeatureSize = 1152
-    val timeSeqLen = 66
 
     /**
       *************************************************************************
@@ -351,37 +379,70 @@ object DeepSpeech2NervanaModelLoader {
     /**
       * left-to-right rnn U, W, and bias
       */
+//
+//    for (i <- 0 until nIn) {
+//      for (j <- 0 until nOut) {
+//        buffer += groups(i)(j)
+//      }
+//    }
+//
+//    for (i <- 2 * nIn until 2 * nIn + nOut) {
+//      for (j <- 0 until nOut) {
+//        buffer += groups(i)(j)
+//      }
+//    }
+//
+//    for (i <- 2 * (nIn + nOut + 1) - 2 until 2 * (nIn + nOut + 1) - 1) {
+//      for (j <- 0 until nOut) {
+//        buffer += groups(i)(j)
+//      }
+//    }
+//
+//    for (i <- nIn until 2 * nIn) {
+//      for (j <- 0 until nOut) {
+//        buffer += groups(i)(j)
+//      }
+//    }
+//
+//    for (i <- (2 * nIn + nOut) until (2 * nIn + 2 * nOut)) {
+//      for (j <- 0 until nOut) {
+//        buffer += groups(i)(j)
+//      }
+//    }
+//
+//    for (i <- 2 * (nIn + nOut + 1) - 1 until 2 * (nIn + nOut + 1)) {
+//      for (j <- 0 until nOut) {
+//        buffer += groups(i)(j)
+//      }
+//    }
+    /**
+      * left-to-right i2h
+      * right-to-left i2h
+      *
+      * left-to-right h2h
+      * left-to-right bias
+      *
+      * right-to-left h2h
+      * right-to-left bias
+      */
+    for (i <- 0 until 2 * nIn + nOut) {
+      for (j <- 0 until nOut) {
+        buffer += groups(i)(j)
+      }
+    }
 
-    for (i <- 0 until nIn) {
-      for (j <- 0 until nOut) {
-        buffer += groups(i)(j)
-      }
-    }
-    for (i <- 2 * nIn until (2 * nIn + nOut)) {
-      for (j <- 0 until nOut) {
-        buffer += groups(i)(j)
-      }
-    }
     for (i <- 2 * (nIn + nOut + 1) - 2 until 2 * (nIn + nOut + 1) - 1) {
       for (j <- 0 until nOut) {
         buffer += groups(i)(j)
       }
     }
 
-    /**
-      * right-to-left rnn U, W, and bias
-      */
-
-    for (i <- nIn until 2 * nIn) {
-      for (j <- 0 until nOut) {
-        buffer += groups(i)(j)
-      }
-    }
     for (i <- (2 * nIn + nOut) until (2 * nIn + 2 * nOut)) {
       for (j <- 0 until nOut) {
         buffer += groups(i)(j)
       }
     }
+
     for (i <- 2 * (nIn + nOut + 1) - 1 until 2 * (nIn + nOut + 1)) {
       for (j <- 0 until nOut) {
         buffer += groups(i)(j)

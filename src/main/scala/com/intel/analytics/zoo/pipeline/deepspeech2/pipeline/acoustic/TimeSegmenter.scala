@@ -37,7 +37,7 @@ class TimeSegmenter ( override val uid: String)
     val rows = dataset.select("path", "target", $(inputCol)).rdd.zipWithIndex().flatMap { case (r, id) =>
       val path = r.getAs[String](0)
       val target = r.getAs[String](1)
-      val arr = r.getSeq[Float](2).toArray.grouped($(segmentSize))
+      val arr = r.getSeq[Double](2).toArray.grouped($(segmentSize))
       arr.zipWithIndex.map { case (data, seq) =>
         Row(path, target, id, seq, data)
       }

@@ -9,9 +9,9 @@ import org.apache.spark.ml.feature.FlacReader
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 
 /**
- * load trained model to inference the audio files.
- */
-object InferenceEvaluate {
+  * load trained model to inference the audio files.
+  */
+object NervanaInferenceEvaluate {
 
   Logger.getLogger("org").setLevel(Level.WARN)
   val logger = Logger.getLogger(getClass)
@@ -76,7 +76,7 @@ object InferenceEvaluate {
   }
 
   private[zoo] def getPipeline(segment:Int, modelPath: String, uttLength: Int, windowSize: Int,
-      windowStride: Int, numFilter: Int, sampleRate: Int): Pipeline = {
+                               windowStride: Int, numFilter: Int, sampleRate: Int): Pipeline = {
 
     val segmenter = new TimeSegmenter()
       .setSegmentSize(sampleRate * segment)
@@ -104,10 +104,10 @@ object InferenceEvaluate {
       .setOutputCol("features")
       .setNumFilters(numFilter)
 
-    val modelTransformer = new DeepSpeech2ModelTransformer(modelPath)
+    val modelTransformer = new DeepSpeech2NervanaModelTransformer(modelPath)
       .setInputCol("features")
       .setOutputCol("prob")
-      .setNumFilters(numFilter)
+
     val decoder = new ArgMaxDecoder()
       .setInputCol("prob")
       .setOutputCol("output")
@@ -117,21 +117,21 @@ object InferenceEvaluate {
       .setWindowSize(windowSize)
 
     new Pipeline().setStages(
-        Array(segmenter, windower, dftSpecgram, melbank, transposeFlip, modelTransformer, decoder))
+      Array(segmenter, windower, dftSpecgram, melbank, transposeFlip, modelTransformer, decoder))
   }
 
   private def evaluate(model: PipelineModel, df: DataFrame): Unit = {
 
     val grouped = model.transform(df).select("path", "target", "audio_id", "audio_seq", "output")
       .rdd.map {
-        case Row(path: String, target: String, audio_id: Long, audio_seq: Int, output: String) =>
-          (audio_id, (path, target, audio_seq, output))
-      }.groupByKey().map(_._2).map { iter =>
-        val path = iter.head._1
-        val target = iter.head._2
-        val text = iter.toArray.sortBy(_._3).map(_._4).mkString(" ")
-        (path, text, target)
-      }
+      case Row(path: String, target: String, audio_id: Long, audio_seq: Int, output: String) =>
+        (audio_id, (path, target, audio_seq, output))
+    }.groupByKey().map(_._2).map { iter =>
+      val path = iter.head._1
+      val target = iter.head._2
+      val text = iter.toArray.sortBy(_._3).map(_._4).mkString(" ")
+      (path, text, target)
+    }
 
     val spark = df.sparkSession
     import spark.implicits._
