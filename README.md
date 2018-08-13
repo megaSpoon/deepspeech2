@@ -21,7 +21,7 @@ run the following script for nervana ds2 inference with bigdl:
  $SPARK_HOME/bin/spark-submit --master local[1] \
    --conf spark.driver.memory=15g \
    --conf "spark.serializer=org.apache.spark.serializer.JavaSerializer" \
-   --driver-class-path deepspeech2-bigdl-0.6-SNAPSHOT-jar-with-dependencies.jar \
+   --driver-class-path deepspeech2-bigdl-0.7-SNAPSHOT-jar-with-dependencies.jar \
    --class com.intel.analytics.zoo.pipeline.deepspeech2.example.NervanaInferenceExample \
    deepspeech2-bigdl-0.7-SNAPSHOT-jar-with-dependencies.jar  \
    -m data/ \
